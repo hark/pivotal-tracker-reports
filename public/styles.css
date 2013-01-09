@@ -1,6 +1,7 @@
 body   { font-family: Tahoma, sans-serif; font-size: 10pt; }
 h1, h2 { font-weight: normal; margin-bottom:0; margin-top: 5px; }
 h2     { margin-top: 1em;}
+h3     { display: inline; color: darkblue;}
 
 .nav {
   margin:0;
