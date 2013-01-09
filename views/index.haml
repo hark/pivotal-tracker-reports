@@ -15,8 +15,6 @@
           =friendly_title(@stories[sid])
           .people Owner: #{@stories[sid].owned_by} | Accepted: #{@stories[sid].accepted_at.strftime("%a %m/%d")} | Requested by: #{@stories[sid].requested_by} on #{@stories[sid].created_at.strftime("%b %d")}
           - unless @stories[sid].description.nil?
-            -# ooooo, clever! but not really useful enough; many links will be to dev details our audience maybe shouldn't look at
-            -#.description #{Story.auto_link_urls(CGI.escapeHTML(@stories[sid].description))}
             .description #{CGI.escapeHTML(@stories[sid].description)}
 %h1{:class=>'title'}
   #{@upcoming_stories.count} Upcoming Stories
