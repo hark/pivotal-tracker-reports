@@ -1,92 +1,104 @@
 require 'sinatra'
 require 'sinatra/reloader' if development?
 require 'haml'
-require 'nokogiri'
-require 'net/http'
-require 'uri'
-require 'cgi'
+require 'pivotal-tracker'
+require 'nokogiri' # TODO go away?
+require 'net/http' # TODO go away?
+require 'uri' # TODO go away?
+require 'cgi' # TODO go away???
 require 'models/story.rb'
 require 'models/owner_work.rb'
 require 'lib/helper.rb'
 require 'date' #this is mac-specific, which doesn't require the standard libs.
+require 'pp'
+
+also_reload 'lib/helper.rb'
 
 before do
-   @days_ago = params[:days_ago].to_i 
-   @days_ago = 7 if @days_ago < 1
-   @start_date = Date.today-@days_ago
-   @pt_uri = URI.parse('http://www.pivotaltracker.com/')
+  @pt_uri = URI.parse('http://www.pivotaltracker.com/')
 end
 
-get '/:projects/:api_key' do
-    @title = 'Accepted Stories Report'
-    @stories = Hash.new
-    @labels = Hash.new
-    @story_points = 0
-    @owner_work = Hash.new
-    
-    #this simply assumes all stories are weighted the same, but if a story has multiple labels, it
-    #splits it's weight across them.
-    @label_weights = Hash.new(0)
-    @created_stories = 0
+get '/:project/:api_key' do
 
-    #which stories are still to come
-    @upcoming_stories = Array.new
-    @upcoming_story_counts = Hash.new(0)
+  PivotalTracker::Client.token = params[:api_key]
+  PivotalTracker::Client.use_ssl = true
 
-    params[:projects].split(',').each do |project|
+  @project = PivotalTracker::Project.find(params[:project])
+  puts "PROJECT: "
+  pp @project
 
-      doc = Nokogiri::HTML(stories(project, params[:api_key], "state:accepted%20includedone:true%20modified_since:#{@start_date.strftime("%m/%d/%Y")}"))
- 
-      doc.xpath('//story').each do |s| 
-        sid = s.xpath('id')[0].content
-        @stories[sid] = Story.new.from_xml(s)
-        @story_points += @stories[sid].estimate
-        @owner_work[@stories[sid].owned_by] ||= OwnerWork.new(@stories[sid].owned_by) and @owner_work[@stories[sid].owned_by].increment(@stories[sid].estimate)
-        labelnode = s.xpath('labels')[0]
-        if labelnode.nil?
-          @labels['z_uncategorized'] = Array.new unless @labels.has_key?('z_uncategorized')
-          @labels['z_uncategorized'] << sid
-          @label_weights['z_uncategorized'] +=1
-        else
-          labels = labelnode.content.split(',')
-          labels.each do |l| 
-            @labels[l] = Array.new unless @labels.has_key?(l)
-            @labels[l] << sid 
-            @label_weights[l] += 1.to_f/labels.count
-          end
-        end
-      end
-      
-      
-      begin
-        @created_stories += Story.count_stories_from_xml(Nokogiri::HTML(created_since(@start_date, project, params[:api_key])))
-        @improved = (@created_stories < @stories.count)
-      rescue
-      end
-      
-      #figure out which stories we expect to come this week
-      begin
-        doc = Nokogiri::HTML(this_week(project, params[:api_key]))
-        doc.xpath('//stories//story').each do |s|
-          story = Story.new.from_xml(s)
-          if story.accepted_at.nil?
-            @upcoming_stories << story
-            @upcoming_story_counts[story.current_state] += 1
-          end
+  @labels = []
+  #@project.labels.split(',').each { |label| @labels[label] = [] } # TODO maybe?
+  puts "LABELS: "
+  pp @project.labels
+
+  @current_iteration = @project.iteration(:current)
+  puts "CURRENT ITERATION: "
+  pp @current_iteration
+
+  @current_stories = @current_iteration.stories
+  puts "CURRENT STORIES: "
+  pp @current_stories
+
+  @title = 'Accepted Stories Report'
+  @stories = Hash.new
+  @labels = Hash.new
+  @story_points = 0
+
+  #this simply assumes all stories are weighted the same, but if a story has multiple labels, it
+  #splits it's weight across them.
+  @label_weights = Hash.new(0)
+
+  #which stories are still to come
+  @upcoming_stories = Array.new
+  @upcoming_story_counts = Hash.new(0)
+
+  params[:project].split(',').each do |project| # TODO remove; only one for now
+
+    # rm modified_since ...
+    #doc = Nokogiri::HTML(stories(project, params[:api_key], "state:accepted%20includedone:true%20modified_since:#{@start_date.strftime("%m/%d/%Y")}"))
+    doc = Nokogiri::HTML(stories(project, params[:api_key], "state:accepted%20includedone:true"))
+
+    doc.xpath('//story').each do |s|
+      sid = s.xpath('id')[0].content
+      @stories[sid] = Story.new.from_xml(s)
+      @story_points += @stories[sid].estimate
+      labelnode = s.xpath('labels')[0]
+      if labelnode.nil?
+        @labels['z_uncategorized'] = Array.new unless @labels.has_key?('z_uncategorized')
+        @labels['z_uncategorized'] << sid
+        @label_weights['z_uncategorized'] +=1
+      else
+        labels = labelnode.content.split(',')
+        labels.each do |l|
+          @labels[l] = Array.new unless @labels.has_key?(l)
+          @labels[l] << sid
+          @label_weights[l] += 1.to_f/labels.count
         end
       end
     end
 
-    #summarize the most-worked labels into an array of percentages
-    @top_labels = @label_weights.sort{|a,b| b[1]<=>a[1]}[0..3].each{|n| n[1] = ((n[1].to_f/@stories.count)*100).to_i }
-    @top_owners = @owner_work.values.sort{|a,b| 
-      comp = (b.points_count <=> a.points_count )
-      comp.zero? ? (b.story_count <=> a.story_count ) : comp 
-    }
-    
-    haml :index
+
+    #figure out which stories we expect to come this week
+    begin
+      doc = Nokogiri::HTML(current(project, params[:api_key]))
+      doc.xpath('//stories//story').each do |s|
+        story = Story.new.from_xml(s)
+        if story.accepted_at.nil?
+          @upcoming_stories << story
+          @upcoming_story_counts[story.current_state] += 1
+        end
+      end
+    end
+  end
+
+  #summarize the most-worked labels into an array of percentages
+  @top_labels = @label_weights.sort { |a, b| b[1]<=>a[1] }[0..3].each { |n| n[1] = ((n[1].to_f/@stories.count)*100).to_i }
+
+  haml :index
 end
 
+# TODO NO LONGER USED-ish.  cannibalize and nuke.
 get '/status/:projects/:api_key' do
   @current_stories = Array.new
   @current_points = 0
@@ -94,14 +106,10 @@ get '/status/:projects/:api_key' do
   @next_points = 0
   @recently_delivered_by_owner = Hash.new
 
-  @recently_logged_stories = Array.new
-  @backlog_stories = Array.new
-  @icebox = Array.new
-
   params[:projects].split(',').each do |project|
     #Get the upcoming work
     begin
-      doc = Nokogiri::HTML(this_week(project, params[:api_key]))
+      doc = Nokogiri::HTML(current(project, params[:api_key]))
       story_iteration_iterator(doc) do |story|
         if story.accepted_at.nil?
           if story.current_state == 'unstarted'
@@ -116,27 +124,7 @@ get '/status/:projects/:api_key' do
         end
       end
     end
-    
-    #Grab the recently logged stories
-    begin
-      doc = Nokogiri::HTML(created_since(@start_date, project, params[:api_key], 'state:unscheduled'))
-      doc.xpath('//stories//story').each do |s|
-        @recently_logged_stories << Story.new.from_xml(s)
-      end
-    end
 
-    #Grab the rest of the backlog
-    begin
-      @backlog_stories = parse_stories_from_iterations(iterations(project, params[:api_key], 3, 1))
-    end
-
-    #Grab the icebox
-    begin
-      doc = Nokogiri::HTML(icebox(project, params[:api_key]))
-      doc.xpath('//stories//story').take(20).each do |s|
-        @icebox << Story.new.from_xml(s)
-      end
-    end
   end
 
   haml :status

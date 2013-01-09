@@ -4,12 +4,13 @@ def type_to_img(story_type)
   return "/#{story_type}.png"
 end
 
+# TODO check usages of this later.  More helpers like this?  Nuke this?
 def friendly_title(story)
-	"<a href=\"#{story.url}\" target=\"_blank\" title=\"#{CGI.escapeHTML(story.description)}\">#{story.title}</a>"
+  "<h3>#{story.title}</h3>"
 end
 
-#Fetches this week's work - returns the body of the API response
-def this_week(project, api_key)
+#Fetches current work - returns the body of the API response
+def current(project, api_key)
 	req = Net::HTTP::Get.new(
 	      "/services/v3/projects/#{project}/iterations/current", 
 	      {'X-TrackerToken'=>api_key}
@@ -36,7 +37,7 @@ def icebox(project, api_key, filter='')
 end
 
 def created_since(date, project, api_key, filter='')
-	return stories(project, api_key, "created_since:#{date.strftime("%m/%d/%Y")}%20#{filter}")
+  return stories(project, api_key, "created_since:#{date.strftime("%m/%d/%Y")}%20#{filter}")
 end
 
 def parse_stories_from_iterations(html)
